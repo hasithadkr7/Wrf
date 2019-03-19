@@ -11,7 +11,7 @@ from configs.constants import ZIP_DEFLATED
 
 
 def extract_variables(nc_f, var_list, lat_min, lat_max, lon_min, lon_max, lat_var='XLAT', lon_var='XLONG',
-                      time_var='Times'):
+                      time_var='XTIME'):
     """
     extract variables from a netcdf file
     :param nc_f:
