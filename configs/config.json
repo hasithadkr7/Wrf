@@ -1,0 +1,12 @@
+{
+  "wrf_dir" : "/mnt/disks/wrf-mod",
+  "wrf_version" : "3",
+  "wrf_model_list" : "A,C,E,SE",
+
+  "start_date" : "2019-04-01",
+
+  "host": "104.198.0.87",
+  "user": "root",
+  "password": "cfcwm07",
+  "db": "curw"
+}
