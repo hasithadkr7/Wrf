@@ -25,7 +25,6 @@ def push_rainfall_to_db(curw_db_adapter, timeseries_dict,
 
     for station, timeseries in timeseries_dict.items():
         print('Pushing data for station ' + station)
-        print('xxxxxxxxx : ', int(np.ceil(len(timeseries) / timesteps)))
         for i in range(int(np.ceil(len(timeseries) / timesteps))):
             meta_data = {
                 'station': station,
@@ -35,18 +34,20 @@ def push_rainfall_to_db(curw_db_adapter, timeseries_dict,
                 'source': source,
                 'name': name,
             }
-            print('meta_data : ', meta_data)
 
             event_id = curw_db_adapter.get_event_id(meta_data)
+            print('xxxxxxxxxxxxx--event_id----xxxxxx : ', event_id)
             if event_id is None:
                 event_id = curw_db_adapter.create_event_id(meta_data)
                 print('HASH SHA256 created: ' + event_id)
-
-            row_count = curw_db_adapter.insert_timeseries(event_id,
+            try:
+                row_count = curw_db_adapter.insert_timeseries(event_id,
                                                           timeseries[i * timesteps:(i + 1) * timesteps],
                                                           upsert=upsert)
-            print('%d rows inserted' % row_count)
-
+                print('%d rows inserted' % row_count)
+            except Exception:
+                #curw_db_adapter.close()
+                traceback.print_exc()
 
 def get_two_element_average(prcp, return_diff=True):
     avg_prcp = (prcp[1:] + prcp[:-1]) * 0.5
@@ -56,18 +57,18 @@ def get_two_element_average(prcp, return_diff=True):
         return avg_prcp
 
 
-def random_check_stations_exist(name):
-    query = {'name': name}
+def datetime_utc_to_lk(timestamp_utc, shift_mins=0):
+    return timestamp_utc + timedelta(hours=5, minutes=30 + shift_mins)
+
+
+def random_check_stations_exist(station):
+    query = {'name': station}
     if curw_db_adapter.get_station(query) is None:
         logging.debug('Random stations check fail')
         return False
     else:
         logging.debug('Random stations check success')
         return True
-
-
-def datetime_utc_to_lk(timestamp_utc, shift_mins=0):
-    return timestamp_utc + timedelta(hours=5, minutes=30 + shift_mins)
 
 
 def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
@@ -116,7 +117,6 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
 
         width = len(lons)
         height = len(lats)
-
         rf_ts = {}
         for y in range(height):
             for x in range(width):
@@ -125,13 +125,10 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
 
                 station_id = '%s_%.6f_%.6f' % (station_prefix, lon, lat)
                 name = station_id
-                # stations_exists = random_check_stations_exist()
-                stations_exists = True
+                stations_exists = random_check_stations_exist(name)
                 if not stations_exists:
-                    logging.info('Creating station %s ...' % name)
                     station = [Station.WRF, station_id, name, str(lon), str(lat), str(0), "WRF point"]
                     curw_db_adapter.create_station(station)
-
                 # add rf series to the dict
                 ts = []
                 for i in range(len(diff)):
@@ -140,15 +137,15 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
                     t = datetime_utc_to_lk(ts_time, shift_mins=30)
                     ts.append([t.strftime('%Y-%m-%d %H:%M:%S'), diff[i, y, x]])
                 rf_ts[name] = ts
-        #print('rf_ts : ', rf_ts)
         push_rainfall_to_db(curw_db_adapter, rf_ts,
                             source=station_prefix,
                             upsert=upsert, name=run_name)
 
 
 if __name__ == "__main__":
+    current_time1 = datetime.datetime.now()
     try:
-        config = json.loads(open('/home/hasitha/PycharmProjects/Wrf/configs/config.json').read())
+        config = json.loads(open('/home/uwcc-admin/netcdf_data_uploader/config.json').read())
         wrf_dir = '/mnt/disks/wrf-mod'
         wrf_version = '3'
         wrf_model_list = 'A,C,E,SE'
@@ -164,15 +161,13 @@ if __name__ == "__main__":
         wrf_model_list = wrf_model_list.split(',')
 
         if start_date:
-            run_date_str = (datetime.strptime(start_date,'%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+            run_date_str = (datetime.strptime(start_date,'%Y-%m-%d')- timedelta(days=1)).strftime('%Y-%m-%d')
         else:
             run_date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-
-        run_date_str = '2019-03-21'
+        print('run_date_str : ', run_date_str)
         daily_dir = 'STATIONS_{}'.format(run_date_str)
 
-        #output_dir = os.path.join(wrf_dir, daily_dir)
-        output_dir = '/home/hasitha/PycharmProjects/Wrf/wrf_output'
+        output_dir = os.path.join(wrf_dir, daily_dir)
 
         curw_db_adapter = MySQLAdapter(host=config['host'],
                                         user=config['user'],
@@ -194,8 +189,12 @@ if __name__ == "__main__":
             except Exception as e:
                 print('Net CDF file reading error.')
                 traceback.print_exc()
-        curw_db_adapter.close()
     except Exception as e:
         print('JSON config data loading error.')
         traceback.print_exc()
+    finally:
         curw_db_adapter.close()
+        current_time2 = datetime.datetime.now()
+        print('---------------------------------------------------------------------')
+        print('Data upload time : ', current_time2 - current_time1)
+        print('---------------------------------------------------------------------')
