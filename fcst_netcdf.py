@@ -19,6 +19,9 @@ SRI_LANKA_EXTENT = [79.5213, 5.91948, 81.879, 9.83506]
 # [lon_min, lat_min, lon_max, lat_max] : [79.5214614868164, 5.722969055175781, 82.1899185180664, 10.064254760742188]
 
 
+# Can used to upload data to new database.
+
+
 def push_rainfall_to_db(db_adapter, timeseries_dict, upsert=False, source='WRF',
                         source_params='{}', name='WRFv3_A'):
     for station, timeseries in timeseries_dict.items():

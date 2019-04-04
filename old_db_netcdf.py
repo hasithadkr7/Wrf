@@ -13,6 +13,9 @@ SRI_LANKA_EXTENT = [79.5213, 5.91948, 81.879, 9.83506]
 # [lon_min, lat_min, lon_max, lat_max] : [79.5214614868164, 5.722969055175781, 82.1899185180664, 10.064254760742188]
 
 
+# Used to upload netcdf data to old database using previous db adapter.
+
+
 def push_rainfall_to_db(curw_db_adapter, timeseries_dict,
                         types=None, timesteps=96, upsert=False, source='WRF',
                         source_params='{}', name='WRFv3_A'):

@@ -35,7 +35,7 @@ then
 fi
 
 # Run email_notifier.py script.
-echo "Running server_netcdf.py. Logs Available in netcdf_reader.log file."
+echo "Running old_db_netcdf.py. Logs Available in netcdf_reader.log file."
 #cmd >>file.txt 2>&1
 #Bash executes the redirects from left to right as follows:
 #  >>file.txt: Open file.txt in append mode and redirect stdout there.
