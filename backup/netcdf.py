@@ -9,39 +9,28 @@ import gzip
 from datetime import datetime, timedelta
 from pip.utils import logging
 from curwmysqladapter import Station, Data
+import pandas as pd
 SRI_LANKA_EXTENT = [79.5213, 5.91948, 81.879, 9.83506]
 # [lon_min, lat_min, lon_max, lat_max] : [79.5214614868164, 5.722969055175781, 82.1899185180664, 10.064254760742188]
 
 
-def push_rainfall_to_db(curw_db_adapter, timeseries_dict, types=None, timesteps=24, upsert=False, source='WRF',
+def push_rainfall_to_db(timeseries_dict, types=None, timesteps=24, upsert=False, source='WRF',
                         source_params='{}', name='WRFv3_A'):
-    if types is None:
-        types = ['Forecast-0-d', 'Forecast-1-d-after', 'Forecast-2-d-after']
-
-    if not curw_db_adapter.get_source(name=source):
-        print('Creating source ' + source)
-        curw_db_adapter.create_source([source, source_params])
-
     for station, timeseries in timeseries_dict.items():
         print('Pushing data for station ' + station)
-        for i in range(int(np.ceil(len(timeseries) / timesteps))):
-            meta_data = {
-                'station': station,
-                'variable': 'Precipitation',
-                'unit': 'mm',
-                'type': types[i],
-                'source': source,
-                'name': name,
-            }
+        meta_data = {
+            'sim_tag': '',
+			'scheduled_date': '',
+			'latitude': '',
+			'longitude': '',
+			'model': '',
+			'version': '',
+			'variable': '',
+			'unit': '',
+            'unit_type': ''
+        }
+        print(meta_data)
 
-            event_id = curw_db_adapter.get_event_id(meta_data)
-            if event_id is None:
-                event_id = curw_db_adapter.create_event_id(meta_data)
-                print('HASH SHA256 created: ' + event_id)
-
-            row_count = curw_db_adapter.insert_timeseries(event_id, timeseries[i * timesteps:(i + 1) * timesteps],
-                                                          upsert=upsert)
-            print('%d rows inserted' % row_count)
 
 
 def get_two_element_average(prcp, return_diff=True):
@@ -77,6 +66,7 @@ def read_netcdf_file(rainc_net_cdf_file_path, rainnc_net_cdf_file_path, station_
         lats = nc_fid.variables['XLAT'][0, :, 0]
         lons = nc_fid.variables['XLONG'][0, 0, :]
 
+
         time_unit_info_list = time_unit_info.split(' ')
 
         # lon_min, lat_min, lon_max, lat_max = SRI_LANKA_EXTENT
@@ -84,7 +74,8 @@ def read_netcdf_file(rainc_net_cdf_file_path, rainnc_net_cdf_file_path, station_
         lat_min = lats[0].item()
         lon_max = lons[-1].item()
         lat_max = lats[-1].item()
-        print('[lon_min, lat_min, lon_max, lat_max] :', [lon_min, lat_min, lon_max, lat_max])
+        print('[lon_min, lon_max, lat_min, lat_max] :', [lon_min, lon_max, lat_min, lat_max])
+
         lat_inds = np.where((lats >= lat_min) & (lats <= lat_max))
         lon_inds = np.where((lons >= lon_min) & (lons <= lon_max))
 
@@ -128,22 +119,21 @@ def read_netcdf_file(rainc_net_cdf_file_path, rainnc_net_cdf_file_path, station_
                 if not stations_exists:
                     logging.info('Creating station %s ...' % name)
                     station = [Station.WRF, station_id, name, str(lon), str(lat), str(0), "WRF point"]
-                    #curw_db_adapter.create_station(station)
+                    # curw_db_adapter.create_station(station)
 
                 # add rf series to the dict
                 ts = []
                 for i in range(len(diff)):
-                    # print(times[i])
-                    # t = datetime_utc_to_lk(datetime.strptime(times[i], '%Y-%m-%d_%H:%M:%S'), shift_mins=30)
-                    # ts.append([t.strftime('%Y-%m-%d %H:%M:%S'), diff[i, y, x]])
                     ts_time = datetime.strptime(time_unit_info_list[2], '%Y-%m-%dT%H:%M:%S') + timedelta(
                         minutes=times[i].item())
                     t = datetime_utc_to_lk(ts_time, shift_mins=30)
-                ts.append([t.strftime('%Y-%m-%d %H:%M:%S'), diff[i, y, x]])
-                rf_ts[name] = ts
-                print(ts)
-
-        #push_rainfall_to_db(curw_db_adapter, rf_ts, source=station_prefix, upsert=upsert, name=run_name)
+                    ts.append([t.strftime('%Y-%m-%d %H:%M:%S'), diff[i, y, x]])
+                data_frame = pd.DataFrame(ts, columns=['time', 'value']).set_index(keys='time')
+                rf_ts[name] = data_frame
+                #print(data_frame)
+                #exit(0)
+        #print(rf_ts)
+        push_rainfall_to_db(rf_ts, source=station_prefix, upsert=upsert, name=run_name)
 
 
 if __name__ == "__main__":

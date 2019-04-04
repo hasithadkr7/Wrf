@@ -1,6 +1,8 @@
 import shutil
 import traceback
 from random import random
+import pandas as pd
+from curwmysqladapter import Station
 from netCDF4 import Dataset
 import numpy as np
 import os
@@ -8,43 +10,31 @@ import json
 import gzip
 from datetime import datetime, timedelta
 import logging
-from curwmysqladapter import Station, MySQLAdapter
+from db_adapter.base import get_engine, get_sessionmaker
+from db_adapter.timeseries import Timeseries
+from db_adapter.station.station_utils import StationUtils
+from db_adapter.station.station_enum import StationEnum
+from db_adapter.source.source_utils import SourceUtils
 SRI_LANKA_EXTENT = [79.5213, 5.91948, 81.879, 9.83506]
 # [lon_min, lat_min, lon_max, lat_max] : [79.5214614868164, 5.722969055175781, 82.1899185180664, 10.064254760742188]
 
 
-def push_rainfall_to_db(curw_db_adapter, timeseries_dict,
-                        types=None, timesteps=96, upsert=False, source='WRF',
+def push_rainfall_to_db(db_adapter, timeseries_dict, upsert=False, source='WRF',
                         source_params='{}', name='WRFv3_A'):
-    if types is None:
-        types = ['Forecast-0-d', 'Forecast-1-d-after', 'Forecast-2-d-after']
-
-    if not curw_db_adapter.get_source(name=source):
-        print('Creating source ' + source)
-        curw_db_adapter.create_source([source, source_params])
-
     for station, timeseries in timeseries_dict.items():
-        for i in range(int(np.ceil(len(timeseries) / timesteps))):
-            meta_data = {
-                'station': station,
-                'variable': 'Precipitation',
-                'unit': 'mm',
-                'type': types[i],
-                'source': source,
-                'name': name,
-            }
-
-            event_id = curw_db_adapter.get_event_id(meta_data)
-            if event_id is None:
-                event_id = curw_db_adapter.create_event_id(meta_data)
-                print('HASH SHA256 created: ' + event_id)
-            try:
-                row_count = curw_db_adapter.insert_timeseries(event_id,
-                                                          timeseries[i * timesteps:(i + 1) * timesteps],
-                                                          upsert=upsert)
-                print('%d rows inserted' % row_count)
-            except Exception:
-                traceback.print_exc()
+        print('Pushing data for station ' + station)
+        meta_data = {
+            'sim_tag': '',
+            'scheduled_date': '',
+            'latitude': station.split('_')[3],
+            'longitude': station.split('_')[4],
+            'model': station.split('_')[0],
+            'version': station.split('_')[1],
+            'variable': '',
+            'unit': '',
+            'unit_type': ''
+        }
+        print(meta_data)
 
 
 def get_two_element_average(prcp, return_diff=True):
@@ -69,7 +59,7 @@ def random_check_stations_exist(station):
         return True
 
 
-def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
+def read_netcdf_file(db_adapter, station_util, rainc_net_cdf_file_path,
                      rainnc_net_cdf_file_path, station_prefix,
                      run_name, upsert=False):
     print('rainc_net_cdf_file_path : ', rainc_net_cdf_file_path)
@@ -80,6 +70,7 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
     elif not os.path.exists(rainnc_net_cdf_file_path):
         print('no rainnc netcdf')
     else:
+        station_util = StationUtils(db_adapter.Session)
         nc_fid = Dataset(rainc_net_cdf_file_path, mode='r')
         rainc_unit_info = nc_fid.variables['RAINC'].units
         print('rainc_unit_info: ', rainc_unit_info)
@@ -125,10 +116,7 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
                 name = station_id
                 stations_exists = random_check_stations_exist(name)
                 if not stations_exists:
-                    station = [Station.WRF, station_id, name, str(lon), str(lat), str(0), "WRF point"]
-                    # correcting lat lon values interchanging error.
-                    #station = [Station.WRF, station_id, name, str(lat), str(lon), str(0), "WRF point"]
-                    curw_db_adapter.create_station(station)
+                    station_util.add_station(name, lat, lon, "WRF point", StationEnum.WRF)
                 # add rf series to the dict
                 ts = []
                 for i in range(len(diff)):
@@ -136,8 +124,9 @@ def read_netcdf_file(curw_db_adapter, rainc_net_cdf_file_path,
                         minutes=times[i].item())
                     t = datetime_utc_to_lk(ts_time, shift_mins=30)
                     ts.append([t.strftime('%Y-%m-%d %H:%M:%S'), diff[i, y, x]])
-                rf_ts[name] = ts
-        push_rainfall_to_db(curw_db_adapter, rf_ts,
+                data_frame = pd.DataFrame(ts, columns=['time', 'value']).set_index(keys='time')
+                rf_ts[name] = data_frame
+        push_rainfall_to_db(db_adapter, rf_ts,
                             source=station_prefix,
                             upsert=upsert, name=run_name)
 
@@ -169,10 +158,14 @@ if __name__ == "__main__":
 
         output_dir = os.path.join(wrf_dir, daily_dir)
 
-        curw_db_adapter = MySQLAdapter(host=config['host'],
-                                        user=config['user'],
-                                        password=config['password'],
-                                        db=config['db'])
+        db_engine = get_engine(
+            host=config['host'],
+            port=3306,
+            user=config['user'],
+            password=config['password'],
+            db=config['db']
+        )
+        tms_adapter = Timeseries(get_sessionmaker(engine=db_engine))
 
         for wrf_model in wrf_model_list:
             run_name = 'WRFv{}_{}'.format(wrf_version, wrf_model)
@@ -182,7 +175,7 @@ if __name__ == "__main__":
             rainnc_net_cdf_file_path = os.path.join(output_dir, rainnc_net_cdf_file)
             station_prefix = 'wrf_v{}_{}'.format(wrf_version, wrf_model)
             try:
-                read_netcdf_file(curw_db_adapter,
+                read_netcdf_file(tms_adapter,
                                  rainc_net_cdf_file_path,
                                  rainnc_net_cdf_file_path,
                                  station_prefix, run_name)
@@ -193,7 +186,6 @@ if __name__ == "__main__":
         print('JSON config data loading error.')
         traceback.print_exc()
     finally:
-        curw_db_adapter.close()
         current_time2 = datetime.datetime.now()
         print('---------------------------------------------------------------------')
         print('Data upload time : ', current_time2 - current_time1)

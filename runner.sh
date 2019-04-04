@@ -24,8 +24,12 @@ if [ ! -f "netcdf_reader.log" ]
 then
     echo "Installing numpy"
     pip install numpy
-    echo "Installing pandas"
-    pip install pandas
+    echo "Installing netCDF4"
+    pip install netCDF4
+    echo "Installing cftime"
+    pip install cftime
+    echo "Installing PyMySQL"
+    pip install PyMySQL
     echo "Installing datalayer"
     pip install git+https://github.com/gihankarunarathne/CurwMySQLAdapter.git -U
 fi
